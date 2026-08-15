@@ -225,11 +225,11 @@ type fakeStatusWriter struct {
 }
 
 func (sw *fakeStatusWriter) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
-	return sw.client.Status().Update(ctx, obj, opts...)
+	return sw.client.client.Status().Update(ctx, obj, opts...)
 }
 
 func (sw *fakeStatusWriter) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-	return sw.client.Status().Patch(ctx, obj, patch, opts...)
+	return sw.client.client.Status().Patch(ctx, obj, patch, opts...)
 }
 
 func (sw *fakeStatusWriter) Create(ctx context.Context, obj client.Object, subResource client.Object, opts ...client.SubResourceCreateOption) error {

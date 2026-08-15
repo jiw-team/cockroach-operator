@@ -69,14 +69,17 @@ func (d decommission) Act(ctx context.Context, cluster *resource.Cluster, log lo
 	}
 	status := &ss.Status
 
-	if status.CurrentReplicas == 0 || status.CurrentReplicas < status.Replicas {
+	// Status.Replicas is the number of pods the stateful set controller currently observes, which tracks the joined
+	// CockroachDB nodes. Status.CurrentReplicas only counts the pods already updated to the latest revision, so it
+	// understates that number while a rolling replacement is in progress.
+	if status.Replicas == 0 {
 		log.V(WARNLEVEL).Info("decommission statefulset does not have all replicas up")
 		return NotReadyErr{Err: errors.New("decommission statefulset does not have all replicas up")}
 	}
 
 	nodes := uint(cluster.Spec().Nodes)
-	log.Info("replicas decommissioning", "status.CurrentReplicas", status.CurrentReplicas, "expected", cluster.Spec().Nodes)
-	if status.CurrentReplicas <= cluster.Spec().Nodes {
+	log.Info("replicas decommissioning", "status.Replicas", status.Replicas, "expected", cluster.Spec().Nodes)
+	if status.Replicas <= cluster.Spec().Nodes {
 		return nil
 	}
 	// test to see if we are running inside of Kubernetes

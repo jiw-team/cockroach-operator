@@ -188,8 +188,8 @@ func (cd *clusterDirector) needsDecommission(cluster *resource.Cluster, ss *apps
 	// In order to decommission,
 	// - the decommission feature must be enabled
 	// - the cluster must be initialized
-	// - the current number of nodes must match the previously specified number of nodes, and that number must exceed the
-	//   currently specified number of nodes
+	// - all of the pods the stateful set asks for must be observed
+	// - the number of nodes the stateful set asks for must exceed the currently specified number of nodes
 
 	if !featureDecommissionEnabled {
 		return false
@@ -197,9 +197,16 @@ func (cd *clusterDirector) needsDecommission(cluster *resource.Cluster, ss *apps
 	if !conditionInitializedTrue {
 		return false
 	}
+	if ss.Spec.Replicas == nil {
+		return false
+	}
 
+	// Status.CurrentReplicas only reports how many observed pods already match the current stateful set revision, so it
+	// understates the number of joined CockroachDB nodes while a rolling replacement is in progress. Scale-down must be
+	// driven by the number of pods the stateful set asks for instead, otherwise a scale-down requested mid-rollout is
+	// handed to Deploy, which shrinks the stateful set without decommissioning the removed node.
 	status := &ss.Status
-	return status.CurrentReplicas == status.Replicas && status.CurrentReplicas > cluster.Spec().Nodes
+	return status.Replicas == *ss.Spec.Replicas && *ss.Spec.Replicas > cluster.Spec().Nodes
 }
 
 func (cd *clusterDirector) needsVersionCheck(cluster *resource.Cluster) bool {

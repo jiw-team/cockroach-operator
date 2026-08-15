@@ -36,6 +36,7 @@ import (
 	apiresource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	kubetypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -43,6 +44,13 @@ import (
 
 // This constructs a mock cluster that behaves as if it were a real cluster in a steady state.
 func createTestDirectorAndStableCluster(t *testing.T) (*resource.Cluster, actor.Director, *fake.Clientset) {
+	cluster, director, clientset, _ := createTestDirectorAndStableClusterWithClient(t)
+	return cluster, director, clientset
+}
+
+// This is createTestDirectorAndStableCluster, but it also hands back the client so that tests may modify the mock
+// cluster's components.
+func createTestDirectorAndStableClusterWithClient(t *testing.T) (*resource.Cluster, actor.Director, *fake.Clientset, client.Client) {
 	var numNodes int32 = 4
 	version := "fake.version"
 	storage := "1Gi"
@@ -155,7 +163,7 @@ func createTestDirectorAndStableCluster(t *testing.T) (*resource.Cluster, actor.
 	config := &rest.Config{}
 	director := actor.NewDirector(scheme, client, config, clientset)
 
-	return cluster, director, clientset
+	return cluster, director, clientset, client
 }
 
 func TestNoActionRequired(t *testing.T) {
@@ -217,6 +225,30 @@ func TestNeedsDecommission(t *testing.T) {
 	actor, err = director.GetActorToExecute(context.Background(), &newCluster, zapr.NewLogger(zaptest.NewLogger(t)))
 	require.Nil(t, err)
 	require.Equal(t, api.DeployAction, actor.GetActionType())
+}
+
+// Scaling down while a rolling replacement of the highest-ordinal pod is still in flight must still decommission the
+// removed node, rather than falling through to Deploy, which shrinks the stateful set directly.
+// See https://github.com/cockroachdb/cockroach-operator/issues/1151.
+func TestNeedsDecommissionDuringRollout(t *testing.T) {
+	cluster, director, _, cl := createTestDirectorAndStableClusterWithClient(t)
+	ctx := context.Background()
+
+	// Put the stateful set into a rollout in which one pod has not yet been updated to the current revision.
+	ss := &appsv1.StatefulSet{}
+	key := kubetypes.NamespacedName{Namespace: cluster.Namespace(), Name: cluster.StatefulSetName()}
+	require.NoError(t, cl.Get(ctx, key, ss))
+	ss.Status.CurrentReplicas = *ss.Spec.Replicas - 1
+	require.NoError(t, cl.Status().Update(ctx, ss))
+
+	// Trigger decommission by decreasing nodes
+	updated := cluster.Unwrap()
+	updated.Spec.Nodes = 3
+
+	newCluster := resource.NewCluster(updated)
+	actor, err := director.GetActorToExecute(ctx, &newCluster, zapr.NewLogger(zaptest.NewLogger(t)))
+	require.Nil(t, err)
+	require.Equal(t, api.DecommissionAction, actor.GetActionType())
 }
 
 func TestNeedsVersionCheck(t *testing.T) {
