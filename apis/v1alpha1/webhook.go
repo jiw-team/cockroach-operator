@@ -111,6 +111,10 @@ func (r *CrdbCluster) ValidateCreate(ctx context.Context, obj runtime.Object) (a
 		errors = append(errors, err)
 	}
 
+	if err := r.ValidateTLSSecrets(); err != nil {
+		errors = append(errors, err)
+	}
+
 	if len(errors) != 0 {
 		return nil, kerrors.NewAggregate(errors)
 	}
@@ -143,6 +147,10 @@ func (r *CrdbCluster) ValidateUpdate(ctx context.Context, oldObj runtime.Object,
 	}
 
 	if err := r.ValidateCockroachVersion(); err != nil {
+		errors = append(errors, err)
+	}
+
+	if err := r.ValidateTLSSecrets(); err != nil {
 		errors = append(errors, err)
 	}
 
@@ -187,6 +195,28 @@ func (r *CrdbCluster) ValidateCockroachVersion() error {
 		return fmt.Errorf("you have to provide the cockroachDBVersion or cockroach image")
 	} else if r.Spec.CockroachDBVersion != "" && (r.Spec.Image != nil && r.Spec.Image.Name != "") {
 		return fmt.Errorf("you have provided both cockroachDBVersion and cockroach image, please provide only one")
+	}
+
+	return nil
+}
+
+// ValidateTLSSecrets validates that nodeTLSSecret and clientTLSSecret are supplied as an
+// all-or-nothing pair. Supplying only one half leaves the operator generating the missing
+// half (or not creating it at all) while the StatefulSet already mounts both, which fails
+// late as an unmountable pod instead of a clear admission error.
+func (r *CrdbCluster) ValidateTLSSecrets() error {
+	if !r.Spec.TLSEnabled {
+		return nil
+	}
+
+	nodeSet := r.Spec.NodeTLSSecret != ""
+	clientSet := r.Spec.ClientTLSSecret != ""
+
+	if nodeSet && !clientSet {
+		return fmt.Errorf("spec.clientTLSSecret is required when spec.nodeTLSSecret is set")
+	}
+	if clientSet && !nodeSet {
+		return fmt.Errorf("spec.nodeTLSSecret is required when spec.clientTLSSecret is set")
 	}
 
 	return nil

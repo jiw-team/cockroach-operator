@@ -69,5 +69,11 @@ func ZoneConfigs(ctx context.Context, db *sql.DB) ([]Zone, error) {
 		}
 		zones = append(zones, zone)
 	}
+	// rows.Next returns false both on normal exhaustion and on a late streaming
+	// error. Without this check a truncated read is indistinguishable from a
+	// complete one, and the caller would derive limits from partial data.
+	if err := rows.Err(); err != nil {
+		return nil, errors.Wrap(err, "failed to iterate crdb_internal.zones")
+	}
 	return zones, nil
 }

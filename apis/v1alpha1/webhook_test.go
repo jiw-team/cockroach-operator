@@ -272,3 +272,46 @@ func TestUpdateCrdbClusterLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateTLSSecrets(t *testing.T) {
+	tests := []struct {
+		name        string
+		spec        CrdbClusterSpec
+		expectedErr string
+	}{
+		{
+			name: "both secrets set",
+			spec: CrdbClusterSpec{TLSEnabled: true, NodeTLSSecret: "node", ClientTLSSecret: "client"},
+		},
+		{
+			name: "neither secret set",
+			spec: CrdbClusterSpec{TLSEnabled: true},
+		},
+		{
+			name:        "node secret without client secret",
+			spec:        CrdbClusterSpec{TLSEnabled: true, NodeTLSSecret: "node"},
+			expectedErr: "spec.clientTLSSecret is required when spec.nodeTLSSecret is set",
+		},
+		{
+			name:        "client secret without node secret",
+			spec:        CrdbClusterSpec{TLSEnabled: true, ClientTLSSecret: "client"},
+			expectedErr: "spec.nodeTLSSecret is required when spec.clientTLSSecret is set",
+		},
+		{
+			name: "half a pair is ignored when TLS is disabled",
+			spec: CrdbClusterSpec{NodeTLSSecret: "node"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cluster := &CrdbCluster{Spec: tc.spec}
+			err := cluster.ValidateTLSSecrets()
+			if tc.expectedErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.EqualError(t, err, tc.expectedErr)
+		})
+	}
+}
